@@ -22,10 +22,33 @@ const checkYtDlp = () => {
       return;
     }
 
-    // Sau đó kiểm tra trong PATH hệ thống
-    exec('where yt-dlp', (error, stdout, stderr) => {
+    // Kiểm tra OS để sử dụng lệnh phù hợp
+    const isWindows = process.platform === 'win32';
+    const command = isWindows ? 'where yt-dlp' : 'which yt-dlp';
+    
+    console.log(`Kiểm tra yt-dlp với lệnh: ${command} (platform: ${process.platform})`);
+    exec(command, (error, stdout, stderr) => {
       if (error) {
-        console.log('Không tìm thấy yt-dlp trong PATH:', error.message);
+        console.log(`Không tìm thấy yt-dlp trong PATH: ${error.message}`);
+        // Thử một vị trí phổ biến khác trên Linux
+        if (!isWindows) {
+          const commonPaths = [
+            '/usr/bin/yt-dlp',
+            '/usr/local/bin/yt-dlp',
+            '/opt/homebrew/bin/yt-dlp'
+          ];
+          
+          for (const commonPath of commonPaths) {
+            if (fs.existsSync(commonPath)) {
+              ytdlpPath = commonPath;
+              ytdlpAvailable = true;
+              console.log('Đã tìm thấy yt-dlp tại vị trí phổ biến:', ytdlpPath);
+              resolve(true);
+              return;
+            }
+          }
+        }
+        
         ytdlpAvailable = false;
         resolve(false);
         return;

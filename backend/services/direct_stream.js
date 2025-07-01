@@ -12,6 +12,17 @@ let ytdlpPath = 'yt-dlp'; // Mặc định yt-dlp trong PATH
 // Tìm yt-dlp trong PATH
 const checkYtDlp = () => {
   return new Promise((resolve) => {
+    // Trước tiên kiểm tra trong thư mục bin của dự án (cho Render)
+    const projectBinPath = path.join(__dirname, '..', '..', 'bin', 'yt-dlp');
+    if (fs.existsSync(projectBinPath)) {
+      ytdlpPath = projectBinPath;
+      console.log('Đã tìm thấy yt-dlp trong thư mục dự án:', ytdlpPath);
+      ytdlpAvailable = true;
+      resolve(true);
+      return;
+    }
+
+    // Sau đó kiểm tra trong PATH hệ thống
     exec('where yt-dlp', (error, stdout, stderr) => {
       if (error) {
         console.log('Không tìm thấy yt-dlp trong PATH:', error.message);

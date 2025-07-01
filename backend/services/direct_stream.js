@@ -1,0 +1,368 @@
+const path = require('path');
+const { PassThrough } = require('stream');
+const https = require('https');
+const http = require('http');
+const { exec, spawn } = require('child_process');
+const fs = require('fs');
+
+// Kiểm tra xem yt-dlp có sẵn không
+let ytdlpAvailable = false;
+let ytdlpPath = 'yt-dlp'; // Mặc định yt-dlp trong PATH
+
+// Tìm yt-dlp trong PATH
+const checkYtDlp = () => {
+  return new Promise((resolve) => {
+    exec('where yt-dlp', (error, stdout, stderr) => {
+      if (error) {
+        console.log('Không tìm thấy yt-dlp trong PATH:', error.message);
+        ytdlpAvailable = false;
+        resolve(false);
+        return;
+      }
+
+      // Lấy đường dẫn đầu tiên tìm được
+      const foundPath = stdout.trim().split('\n')[0];
+      if (foundPath) {
+        ytdlpPath = foundPath;
+        console.log('Đã tìm thấy yt-dlp tại:', ytdlpPath);
+        ytdlpAvailable = true;
+        resolve(true);
+      } else {
+        console.log('Không tìm thấy yt-dlp trong PATH');
+        ytdlpAvailable = false;
+        resolve(false);
+      }
+    });
+  });
+};
+
+// Khởi tạo - kiểm tra yt-dlp
+checkYtDlp().catch(err => {
+  console.error('Lỗi khi kiểm tra yt-dlp:', err);
+  ytdlpAvailable = false;
+});
+
+/**
+ * Lấy thông tin video YouTube từ oEmbed API
+ * @param {string} videoId - ID của video YouTube
+ * @returns {Object} Thông tin cơ bản về video
+ */
+const getBasicVideoInfo = async (videoId) => {
+  return new Promise((resolve, reject) => {
+    const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    
+    https.get(url, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        try {
+          if (res.statusCode !== 200) {
+            return reject(new Error(`HTTP Error: ${res.statusCode}`));
+          }
+          
+          const info = JSON.parse(data);
+          resolve({
+            title: info.title || 'Unknown Title',
+            author: info.author_name || 'Unknown Author',
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            mimeType: 'audio/mp4',
+            lengthSeconds: 0
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }).on('error', (error) => {
+      reject(error);
+    });
+  });
+};
+
+/**
+ * Lấy thông tin video bằng yt-dlp
+ * @param {string} videoId - ID của video YouTube 
+ * @returns {Promise<Object>} Thông tin video
+ */
+const getYtDlpVideoInfo = async (videoId) => {
+  return new Promise((resolve, reject) => {
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const command = `${ytdlpPath} -j ${videoUrl}`;
+    
+    exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Lỗi khi lấy thông tin từ yt-dlp:', error);
+        console.error('stderr:', stderr);
+        return reject(error);
+      }
+      
+      try {
+        const videoInfo = JSON.parse(stdout);
+        
+        // Tìm định dạng audio tốt nhất
+        const audioFormats = videoInfo.formats.filter(format => 
+          format.acodec && format.acodec !== 'none' && (!format.vcodec || format.vcodec === 'none')
+        );
+        
+        let bestAudioFormat;
+        if (audioFormats.length > 0) {
+          // Sắp xếp theo chất lượng giảm dần
+          bestAudioFormat = audioFormats.sort((a, b) => {
+            const aQuality = a.abr || 0;
+            const bQuality = b.abr || 0;
+            return bQuality - aQuality;
+          })[0];
+        } else {
+          // Nếu không tìm thấy định dạng audio, sử dụng định dạng đầu tiên
+          bestAudioFormat = videoInfo.formats[0];
+        }
+        
+        resolve({
+          url: bestAudioFormat?.url || videoInfo.url,
+          title: videoInfo.title,
+          author: videoInfo.uploader || 'Unknown',
+          lengthSeconds: videoInfo.duration || 0,
+          mimeType: getMimeType(bestAudioFormat),
+          contentLength: bestAudioFormat?.filesize || 0
+        });
+      } catch (parseError) {
+        console.error('Lỗi khi phân tích dữ liệu từ yt-dlp:', parseError);
+        reject(parseError);
+      }
+    });
+  });
+};
+
+/**
+ * Lấy thông tin video YouTube
+ * @param {string} videoId - ID của video YouTube
+ * @returns {Object} Thông tin video
+ */
+const getVideoInfo = async (videoId) => {
+  try {
+    if (!videoId) {
+      throw new Error('ID video không hợp lệ');
+    }
+    
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log('Đang lấy thông tin video từ dịch vụ trực tiếp:', videoUrl);
+    
+    // Nếu yt-dlp khả dụng, sử dụng nó
+    if (ytdlpAvailable) {
+      try {
+        console.log('Đang lấy thông tin video từ yt-dlp:', videoUrl);
+        // Lấy thông tin từ yt-dlp
+        return await getYtDlpVideoInfo(videoId);
+      } catch (ytdlpError) {
+        console.error('Lỗi khi lấy thông tin video từ yt-dlp:', ytdlpError);
+        // Sử dụng phương pháp thay thế nếu yt-dlp thất bại
+        return await getBasicVideoInfo(videoId);
+      }
+    } else {
+      // Nếu yt-dlp không khả dụng, sử dụng oEmbed API
+      return await getBasicVideoInfo(videoId);
+    }
+  } catch (error) {
+    console.error('Lỗi khi lấy thông tin video:', error);
+    throw error;
+  }
+};
+
+/**
+ * Xác định MIME type dựa trên định dạng
+ * @param {Object} format - Định dạng từ yt-dlp
+ * @returns {string} MIME type
+ */
+const getMimeType = (format) => {
+  if (!format) return 'audio/mp4';
+  
+  const ext = format.ext || '';
+  
+  switch (ext.toLowerCase()) {
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'm4a':
+      return 'audio/mp4';
+    case 'opus':
+      return 'audio/opus';
+    case 'ogg':
+      return 'audio/ogg';
+    case 'webm':
+      return 'audio/webm';
+    default:
+      return 'audio/mp4';
+  }
+};
+
+/**
+ * Tạo stream từ URL
+ * @param {string} url - URL để stream
+ * @returns {ReadableStream} Stream data
+ */
+const createStreamFromUrl = (url) => {
+  return new Promise((resolve, reject) => {
+    const passThrough = new PassThrough();
+    
+    // Xác định đúng module http/https để sử dụng
+    const httpModule = url.startsWith('https:') ? https : http;
+    
+    httpModule.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        // Xử lý chuyển hướng
+        return createStreamFromUrl(res.headers.location)
+          .then(stream => resolve(stream))
+          .catch(err => reject(err));
+      }
+      
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP Error: ${res.statusCode}`));
+      }
+      
+      res.pipe(passThrough);
+      
+      res.on('error', (error) => {
+        passThrough.emit('error', error);
+      });
+      
+    }).on('error', (error) => {
+      reject(error);
+    });
+    
+    resolve(passThrough);
+  });
+};
+
+/**
+ * Tạo stream audio bằng yt-dlp
+ * @param {string} videoId - ID của video YouTube
+ * @returns {Promise<ReadableStream>} Stream audio
+ */
+const createYtDlpStream = async (videoId) => {
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  console.log('Đang tạo stream audio từ yt-dlp:', videoUrl);
+  
+  const passThrough = new PassThrough();
+  
+  try {
+    // Tùy chọn yt-dlp được tối ưu cho streaming:
+    // -f bestaudio/best - chọn định dạng audio tốt nhất
+    // -o - - output đến stdout
+    // --no-part - không tạo file tạm .part 
+    // --no-progress - không hiển thị thanh tiến trình (giảm output không cần thiết)
+    // --no-playlist - không xử lý playlist, chỉ video
+    // --quiet - giảm output
+    const ytDlpProcess = spawn(ytdlpPath, [
+      '-f', 'bestaudio/best',
+      '--no-part',
+      '--no-progress',
+      '--no-playlist',
+      '--quiet',
+      '-o', '-',
+      videoUrl
+    ]);
+    
+    ytDlpProcess.stdout.pipe(passThrough);
+    
+    ytDlpProcess.stderr.on('data', (data) => {
+      console.error('yt-dlp stderr:', data.toString());
+    });
+    
+    ytDlpProcess.on('error', (error) => {
+      console.error('Lỗi khi chạy yt-dlp:', error);
+      passThrough.emit('error', error);
+    });
+    
+    ytDlpProcess.on('close', (code) => {
+      if (code !== 0) {
+        console.log(`yt-dlp process exited with code ${code}`);
+        if (!passThrough.destroyed) {
+          passThrough.emit('error', new Error(`yt-dlp exited with code ${code}`));
+        }
+      } else {
+        console.log('yt-dlp stream kết thúc thành công');
+        if (!passThrough.destroyed) {
+          passThrough.end();
+        }
+      }
+    });
+    
+    // Đảm bảo tắt yt-dlp process khi stream bị hủy
+    passThrough.on('close', () => {
+      if (ytDlpProcess && !ytDlpProcess.killed) {
+        ytDlpProcess.kill();
+      }
+    });
+    
+    return passThrough;
+  } catch (error) {
+    console.error('Lỗi khi tạo stream với yt-dlp:', error);
+    passThrough.emit('error', error);
+    return passThrough;
+  }
+};
+
+/**
+ * Tạo stream audio từ video YouTube
+ * @param {string} videoId - ID của video YouTube
+ * @returns {Promise<ReadableStream>} Stream audio
+ */
+const createAudioStream = async (videoId) => {
+  try {
+    if (!videoId) {
+      throw new Error('ID video không hợp lệ');
+    }
+    
+    console.log('Đang tạo stream audio từ phương pháp trực tiếp, videoId:', videoId);
+    
+    // Kiểm tra lại yt-dlp nếu chưa tìm thấy
+    if (!ytdlpAvailable) {
+      await checkYtDlp();
+    }
+    
+    // Nếu yt-dlp khả dụng, sử dụng nó
+    if (ytdlpAvailable) {
+      try {
+        return await createYtDlpStream(videoId);
+      } catch (ytdlpError) {
+        console.error('Lỗi khi tạo stream từ yt-dlp, thử phương pháp thay thế:', ytdlpError);
+        // Nếu yt-dlp thất bại, thử phương pháp thay thế
+        const info = await getVideoInfo(videoId);
+        if (info && info.url) {
+          return await createStreamFromUrl(info.url);
+        }
+        throw new Error('Không thể lấy URL stream');
+      }
+    } else {
+      // Phương pháp thay thế nếu không có yt-dlp
+      console.log('yt-dlp không khả dụng, sử dụng phương pháp thay thế');
+      try {
+        // Sử dụng Piped API để lấy stream
+        console.log('Đang tạo stream qua Piped API');
+        return await createStreamFromUrl(`https://pipedapi.kavin.rocks/streams/${videoId}`);
+      } catch (pipedError) {
+        console.error('Lỗi khi tạo stream qua Piped API:', pipedError);
+        
+        // Thử lấy thông tin video trực tiếp
+        const info = await getBasicVideoInfo(videoId);
+        
+        if (info && info.url) {
+          console.log('Thử tạo stream trực tiếp từ URL');
+          return await createStreamFromUrl(info.url);
+        }
+        
+        throw new Error('Không thể tạo stream audio bằng bất kỳ phương pháp nào');
+      }
+    }
+  } catch (error) {
+    console.error('Lỗi khi tạo audio stream:', error);
+    throw error;
+  }
+};
+
+module.exports = {
+  getVideoInfo,
+  createAudioStream
+}; 

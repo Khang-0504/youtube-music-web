@@ -480,6 +480,56 @@ const createInvidiousStream = async (videoId) => {
 };
 
 /**
+ * Tạo stream audio từ Piped API
+ * @param {string} videoId - ID video YouTube
+ * @returns {Promise<ReadableStream>} Stream audio
+ */
+const createPipedStream = async (videoId) => {
+  try {
+    console.log(`Đang tạo stream qua Piped API cho video ID: ${videoId}`);
+    
+    const pipedUrl = `https://pipedapi.kavin.rocks/streams/${videoId}`;
+    console.log(`Đang yêu cầu từ Piped API: ${pipedUrl}`);
+    
+    const response = await new Promise((resolve, reject) => {
+      https.get(pipedUrl, (res) => {
+        let data = '';
+        
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        
+        res.on('end', () => {
+          try {
+            if (res.statusCode !== 200) {
+              return reject(new Error(`HTTP Error: ${res.statusCode}`));
+            }
+            resolve(JSON.parse(data));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }).on('error', (error) => {
+        reject(error);
+      });
+    });
+    
+    if (!response || !response.audioStreams || response.audioStreams.length === 0) {
+      throw new Error('Không tìm thấy stream audio từ Piped API');
+    }
+    
+    // Lấy stream audio chất lượng tốt nhất
+    const bestAudio = response.audioStreams.sort((a, b) => b.bitrate - a.bitrate)[0];
+    console.log(`Đã tìm thấy URL audio từ Piped: ${bestAudio.url.substring(0, 50)}...`);
+    
+    return await createStreamFromUrl(bestAudio.url);
+  } catch (error) {
+    console.error('Lỗi khi tạo stream từ Piped API:', error);
+    throw error;
+  }
+};
+
+/**
  * Tạo stream audio từ video YouTube
  * @param {string} videoId - ID của video YouTube
  * @returns {Promise<ReadableStream>} Stream audio
@@ -499,32 +549,52 @@ const createAudioStream = async (videoId) => {
     
     const env = process.env.NODE_ENV || 'development';
     
-    // Trong môi trường production (Render.com), ưu tiên sử dụng Invidious
+    // Trong môi trường production (Render.com), thay đổi thứ tự ưu tiên
     if (env === 'production') {
-      console.log('Môi trường production: Ưu tiên Invidious để tránh giới hạn rate limit');
+      console.log('Môi trường production: Ưu tiên các phương pháp vượt rate limit');
+      
+      // Thứ tự ưu tiên: 1. Piped API, 2. yt-dlp với cookie, 3. Invidious API
       try {
-        return await createInvidiousStream(videoId);
-      } catch (invidiousError) {
-        console.error('Lỗi khi tạo stream từ Invidious, thử phương pháp thay thế:', invidiousError);
+        // 1. Thử Piped API trước
+        console.log('Thử sử dụng Piped API (ưu tiên 1)');
+        return await createPipedStream(videoId);
+      } catch (pipedError) {
+        console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
         
-        // Thử với yt-dlp nếu có
+        // 2. Thử với yt-dlp nếu có cookie thực
         if (ytdlpAvailable) {
           try {
-            return await createYtDlpStream(videoId);
+            const cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+            const hasCookies = fs.existsSync(cookiesPath);
+            const fileSize = hasCookies ? fs.statSync(cookiesPath).size : 0;
+            
+            // Chỉ sử dụng yt-dlp nếu file cookie lớn hơn 100 byte (có khả năng là cookie thực)
+            if (hasCookies && fileSize > 100) {
+              console.log('Tìm thấy cookie có kích thước hợp lệ, thử sử dụng yt-dlp');
+              return await createYtDlpStream(videoId);
+            } else {
+              console.log('File cookie quá nhỏ hoặc không tồn tại, bỏ qua yt-dlp');
+            }
           } catch (ytdlpError) {
             console.error('Lỗi khi tạo stream từ yt-dlp:', ytdlpError);
-            
-            // Thử phương pháp cuối cùng
-            const info = await getBasicVideoInfo(videoId);
-            if (info && info.url) {
-              return await createStreamFromUrl(info.url);
-            }
-            throw new Error('Không thể tạo stream audio');
           }
         }
         
-        // Thử dùng Piped nếu không có yt-dlp
-        return await createStreamFromUrl(`https://pipedapi.kavin.rocks/streams/${videoId}`);
+        // 3. Thử Invidious API
+        try {
+          console.log('Thử sử dụng Invidious API (ưu tiên 3)');
+          return await createInvidiousStream(videoId);
+        } catch (invidiousError) {
+          console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
+          
+          // 4. Phương án cuối cùng - cố gắng dùng thông tin cơ bản
+          console.log('Thử phương án cuối cùng với getBasicVideoInfo');
+          const info = await getBasicVideoInfo(videoId);
+          if (info && info.url) {
+            return await createStreamFromUrl(info.url);
+          }
+          throw new Error('Không thể tạo stream audio bằng bất kỳ phương pháp nào');
+        }
       }
     }
     

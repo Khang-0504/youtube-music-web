@@ -123,6 +123,35 @@ git push heroku master
 4. Chọn bài hát từ danh sách kết quả
 5. Nhạc sẽ tự động phát
 
+## Vượt qua giới hạn truy cập của YouTube với Cookies
+
+YouTube thường có giới hạn truy cập (HTTP 429) cho các yêu cầu không xác thực. Để giải quyết vấn đề này, bạn có thể cung cấp cookies từ tài khoản YouTube đã đăng nhập của bạn:
+
+### Cách xuất và sử dụng cookies.txt
+1. **Cài đặt tiện ích mở rộng cho trình duyệt:**
+   - Chrome/Cốc Cốc: [Get cookies.txt](https://chrome.google.com/webstore/detail/get-cookiestxt/bgaddhkoddajcdgocldbbfleckgcbcid)
+   - Firefox: [Cookie Quick Manager](https://addons.mozilla.org/en-US/firefox/addon/cookie-quick-manager/)
+
+2. **Xuất cookies từ YouTube:**
+   - Đăng nhập vào [YouTube](https://www.youtube.com) bằng tài khoản Google của bạn
+   - Mở tiện ích "Get cookies.txt" đã cài đặt
+   - Nhấn "Export" để tải xuống file cookies.txt
+
+3. **Thêm cookies vào ứng dụng:**
+   - Đặt file cookies.txt đã tải xuống vào thư mục `backend/` của dự án
+   - KHÔNG commit file này lên GitHub (đã thêm vào .gitignore)
+
+4. **Triển khai trên Render.com:**
+   - Khi triển khai trên Render.com, bạn cần tải lên file cookies.txt thông qua Render Dashboard
+   - Vào Environment > Secret Files > Add Secret File
+   - Path: `/opt/render/project/src/backend/cookies.txt`
+   - Contents: Nội dung của file cookies.txt đã xuất
+
+### Lưu ý bảo mật
+- Cookies chứa thông tin đăng nhập tài khoản Google của bạn
+- KHÔNG chia sẻ file cookies.txt hoặc đưa vào mã nguồn công khai
+- Định kỳ cập nhật cookies (khoảng 1-2 tháng/lần) để đảm bảo tính hiệu lực
+
 ## Giấy phép
 
 MIT 

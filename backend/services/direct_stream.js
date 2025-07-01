@@ -124,7 +124,24 @@ const getBasicVideoInfo = async (videoId) => {
 const getYtDlpVideoInfo = async (videoId) => {
   return new Promise((resolve, reject) => {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const command = `${ytdlpPath} -j --add-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9" ${videoUrl}`;
+    
+    // Sử dụng tệp cookies.txt từ thư mục hiện tại hoặc thư mục cha
+    const cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+    
+    // Kiểm tra xem file cookies có tồn tại không
+    const hasCookies = fs.existsSync(cookiesPath);
+    
+    let command = `${ytdlpPath} -j`;
+    
+    if (hasCookies) {
+      console.log('Đã tìm thấy file cookies.txt, sử dụng để xác thực với YouTube');
+      command += ` --cookies "${cookiesPath}"`;
+    } else {
+      console.log('Không tìm thấy file cookies.txt, sử dụng headers để mô phỏng trình duyệt');
+      command += ` --add-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9"`;
+    }
+    
+    command += ` ${videoUrl}`;
     
     exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       if (error) {
@@ -365,24 +382,38 @@ const createYtDlpStream = async (videoId) => {
   const passThrough = new PassThrough();
   
   try {
-    // Tùy chọn yt-dlp được tối ưu cho streaming:
-    // -f bestaudio/best - chọn định dạng audio tốt nhất
-    // -o - - output đến stdout
-    // --no-part - không tạo file tạm .part 
-    // --no-progress - không hiển thị thanh tiến trình (giảm output không cần thiết)
-    // --no-playlist - không xử lý playlist, chỉ video
-    // --quiet - giảm output
-    const ytDlpProcess = spawn(ytdlpPath, [
+    // Sử dụng tệp cookies.txt từ thư mục hiện tại hoặc thư mục cha
+    const cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+    
+    // Kiểm tra xem file cookies có tồn tại không
+    const hasCookies = fs.existsSync(cookiesPath);
+    
+    // Tùy chọn yt-dlp được tối ưu cho streaming
+    const ytDlpArgs = [
       '-f', 'bestaudio/best',
       '--no-part',
       '--no-progress',
       '--no-playlist',
       '--quiet',
-      '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      '--add-header', 'Accept-Language: en-US,en;q=0.9',
-      '-o', '-',
-      videoUrl
-    ]);
+    ];
+    
+    // Thêm tùy chọn cookies nếu file tồn tại
+    if (hasCookies) {
+      console.log('Sử dụng cookies.txt cho stream');
+      ytDlpArgs.push('--cookies', cookiesPath);
+    } else {
+      console.log('Không tìm thấy cookies.txt, sử dụng headers thay thế');
+      ytDlpArgs.push(
+        '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--add-header', 'Accept-Language: en-US,en;q=0.9'
+      );
+    }
+    
+    // Thêm các tùy chọn cuối cùng
+    ytDlpArgs.push('-o', '-', videoUrl);
+    
+    // Chạy yt-dlp với các tùy chọn đã cấu hình
+    const ytDlpProcess = spawn(ytdlpPath, ytDlpArgs);
     
     ytDlpProcess.stdout.pipe(passThrough);
     

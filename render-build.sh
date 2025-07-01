@@ -1,45 +1,43 @@
-#!/usr/bin/env bash
-# Script cài đặt yt-dlp và build ứng dụng cho Render
+#!/bin/bash
+# Script chạy trong quá trình build trên Render.com
 
-# Hiển thị thư mục hiện tại
-echo "Thư mục hiện tại: $(pwd)"
-ls -la
+# Đường dẫn thư mục gốc của dự án
+PROJECT_ROOT="/opt/render/project/src"
+BIN_DIR="$PROJECT_ROOT/bin"
 
-# Cài đặt yt-dlp
-echo "Đang cài đặt yt-dlp..."
-curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ./yt-dlp
-chmod a+rx ./yt-dlp
-mkdir -p bin
-mv ./yt-dlp bin/
-export PATH="$PATH:$(pwd)/bin"
+# Tạo thư mục bin nếu chưa tồn tại
+mkdir -p $BIN_DIR
 
-# Kiểm tra phiên bản
-echo "Phiên bản yt-dlp:"
-./bin/yt-dlp --version
+# Tải yt-dlp mới nhất
+echo "Đang tải yt-dlp..."
+curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o $BIN_DIR/yt-dlp
+chmod +x $BIN_DIR/yt-dlp
 
-# Cài đặt start.sh có quyền thực thi
-echo "Cấp quyền thực thi cho start.sh..."
-chmod +x start.sh
+# Tạo file cookie trống nếu không tồn tại
+echo "Tạo file cookie mặc định nếu cần..."
+if [ ! -f "$PROJECT_ROOT/backend/cookies.txt" ]; then
+    echo "# Netscape HTTP Cookie File" > "$PROJECT_ROOT/backend/cookies.txt"
+    echo "# Đây là file cookie mặc định. Thay thế bằng cookie thật từ trình duyệt để cải thiện khả năng hoạt động." >> "$PROJECT_ROOT/backend/cookies.txt"
+fi
 
-# Cài đặt dependencies
-echo "Đang cài đặt dependencies..."
+# Di chuyển vào thư mục frontend
+cd "$PROJECT_ROOT/frontend"
+
+# Cài đặt các phụ thuộc cho frontend
+echo "Cài đặt các phụ thuộc cho frontend..."
 npm install
-
-# Kiểm tra cấu trúc thư mục
-echo "Cấu trúc thư mục:"
-ls -la
 
 # Build frontend
 echo "Đang build frontend..."
-cd frontend && npm install && npm run build && cd ..
+npm run build
 
-# Kiểm tra thư mục build
+# Kiểm tra thư mục build frontend
 echo "Kiểm tra thư mục build frontend:"
-ls -la frontend/build
+ls -la build
 
-# Copy build frontend vào thư mục public của backend (đảm bảo server.js sẽ phục vụ từ đây)
+# Copy thư mục build vào backend/public
 echo "Copy build frontend vào thư mục public của backend..."
-mkdir -p backend/public
-cp -r frontend/build/* backend/public/
+mkdir -p "$PROJECT_ROOT/backend/public"
+cp -r build/* "$PROJECT_ROOT/backend/public/"
 
 echo "Build hoàn tất!" 

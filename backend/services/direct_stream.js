@@ -124,7 +124,7 @@ const getBasicVideoInfo = async (videoId) => {
 const getYtDlpVideoInfo = async (videoId) => {
   return new Promise((resolve, reject) => {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const command = `${ytdlpPath} -j ${videoUrl}`;
+    const command = `${ytdlpPath} -j --cookies-from-browser chrome ${videoUrl}`;
     
     exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       if (error) {
@@ -294,6 +294,7 @@ const createYtDlpStream = async (videoId) => {
       '--no-progress',
       '--no-playlist',
       '--quiet',
+      '--cookies-from-browser', 'chrome',
       '-o', '-',
       videoUrl
     ]);

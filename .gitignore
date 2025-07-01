@@ -1,0 +1,14 @@
+# Node.js backend
+node_modules/
+npm-debug.log*
+.env
+.DS_Store
+
+# React frontend
+frontend/node_modules/
+frontend/.cache/
+frontend/build/
+
+# VS Code, OS
+.vscode/
+*.log

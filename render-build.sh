@@ -17,6 +17,10 @@ export PATH="$PATH:$(pwd)/bin"
 echo "Phiên bản yt-dlp:"
 ./bin/yt-dlp --version
 
+# Cài đặt start.sh có quyền thực thi
+echo "Cấp quyền thực thi cho start.sh..."
+chmod +x start.sh
+
 # Cài đặt dependencies
 echo "Đang cài đặt dependencies..."
 npm install

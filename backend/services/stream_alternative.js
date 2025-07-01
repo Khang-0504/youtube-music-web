@@ -17,32 +17,45 @@ const getAudioInfo = async (videoId) => {
     // Lưu URL trực tiếp vào cache
     directUrls[videoId] = videoUrl;
     
-    // Lấy thông tin video
-    const info = await play.video_info(videoUrl);
-    const videoDetails = info.video_details;
-    
-    if (!videoDetails) {
-      throw new Error('Không thể lấy thông tin chi tiết video');
-    }
-    
-    // Lưu trữ thông tin video để sử dụng sau này
-    videoInfoCache[videoId] = info;
-    
-    // Lấy formats
-    const formats = info.format;
-    if (!formats || formats.length === 0) {
-      throw new Error('Không tìm thấy định dạng cho video này');
-    }
-    
-    // Lọc ra định dạng audio
-    const audioFormats = formats.filter(format => 
-      format.mimeType && format.mimeType.includes('audio')
-    );
-    
-    if (audioFormats.length === 0) {
-      // Nếu không tìm thấy định dạng audio, thử lấy bất kỳ định dạng nào
-      console.log('Không tìm thấy định dạng audio, sử dụng định dạng đầu tiên');
-      const bestAudioFormat = formats[0];
+    try {
+      // Lấy thông tin video
+      const info = await play.video_info(videoUrl);
+      const videoDetails = info.video_details;
+      
+      if (!videoDetails) {
+        throw new Error('Không thể lấy thông tin chi tiết video');
+      }
+      
+      // Lưu trữ thông tin video để sử dụng sau này
+      videoInfoCache[videoId] = info;
+      
+      // Lấy formats
+      const formats = info.format;
+      if (!formats || formats.length === 0) {
+        throw new Error('Không tìm thấy định dạng cho video này');
+      }
+      
+      // Lọc ra định dạng audio
+      const audioFormats = formats.filter(format => 
+        format.mimeType && format.mimeType.includes('audio')
+      );
+      
+      if (audioFormats.length === 0) {
+        // Nếu không tìm thấy định dạng audio, thử lấy bất kỳ định dạng nào
+        console.log('Không tìm thấy định dạng audio, sử dụng định dạng đầu tiên');
+        const bestAudioFormat = formats[0];
+        
+        return {
+          url: bestAudioFormat.url,
+          title: videoDetails.title || 'Unknown Title',
+          author: videoDetails.channel?.name || 'Unknown Author',
+          lengthSeconds: videoDetails.durationInSec || 0,
+          mimeType: bestAudioFormat.mimeType || 'audio/mp4',
+          contentLength: bestAudioFormat.contentLength || 0
+        };
+      }
+      
+      const bestAudioFormat = audioFormats[0];
       
       return {
         url: bestAudioFormat.url,
@@ -52,19 +65,24 @@ const getAudioInfo = async (videoId) => {
         mimeType: bestAudioFormat.mimeType || 'audio/mp4',
         contentLength: bestAudioFormat.contentLength || 0
       };
+    } catch (error) {
+      // Kiểm tra lỗi 429 (Too Many Requests) và chuyển hướng sang direct_stream
+      if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+        console.log('Phát hiện lỗi 429, chuyển hướng sang direct_stream');
+        throw new Error('REDIRECT_TO_DIRECT_STREAM');
+      }
+      // Kiểm tra lỗi 410 (Gone) và chuyển hướng sang direct_stream
+      if (error.message.includes('410') || error.message.includes('Gone')) {
+        console.log('Phát hiện lỗi 410, chuyển hướng sang direct_stream');
+        throw new Error('REDIRECT_TO_DIRECT_STREAM');
+      }
+      throw error;
     }
-    
-    const bestAudioFormat = audioFormats[0];
-    
-    return {
-      url: bestAudioFormat.url,
-      title: videoDetails.title || 'Unknown Title',
-      author: videoDetails.channel?.name || 'Unknown Author',
-      lengthSeconds: videoDetails.durationInSec || 0,
-      mimeType: bestAudioFormat.mimeType || 'audio/mp4',
-      contentLength: bestAudioFormat.contentLength || 0
-    };
   } catch (error) {
+    // Kiểm tra nếu là lỗi chuyển hướng đặc biệt
+    if (error.message === 'REDIRECT_TO_DIRECT_STREAM') {
+      throw error;
+    }
     console.error('Lỗi khi lấy thông tin audio:', error);
     throw error;
   }
@@ -103,6 +121,17 @@ const createAudioStream = async (videoId) => {
       }
     } catch (streamError) {
       console.log('Phương pháp 1 thất bại:', streamError.message);
+      
+      // Kiểm tra lỗi 429 (Too Many Requests) và chuyển hướng sang direct_stream
+      if (streamError.message.includes('429') || streamError.message.includes('Too Many Requests')) {
+        console.log('Phát hiện lỗi 429, chuyển hướng sang direct_stream');
+        throw new Error('REDIRECT_TO_DIRECT_STREAM');
+      }
+      // Kiểm tra lỗi 410 (Gone) và chuyển hướng sang direct_stream
+      if (streamError.message.includes('410') || streamError.message.includes('Gone')) {
+        console.log('Phát hiện lỗi 410, chuyển hướng sang direct_stream');
+        throw new Error('REDIRECT_TO_DIRECT_STREAM');
+      }
       
       try {
         // Phương pháp 2: Thử lấy thông tin trước, sau đó stream

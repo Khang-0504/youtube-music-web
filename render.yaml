@@ -3,10 +3,12 @@ services:
     name: youtube-music-web
     env: node
     buildCommand: ./render-build.sh
-    startCommand: cd backend && npm start
+    startCommand: ./start.sh
     envVars:
       - key: HOST
         value: 0.0.0.0
+      - key: PORT
+        value: 10000
       - key: CORS_ORIGIN
         value: "*"
       - key: DEFAULT_YOUTUBE_API_KEY

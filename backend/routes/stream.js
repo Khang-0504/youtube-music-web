@@ -24,6 +24,18 @@ router.get('/info/:videoId', async (req, res) => {
       });
     }
     
+    // Trong môi trường production, ưu tiên yt-dlp ngay từ đầu
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        console.log('Môi trường production: Ưu tiên yt-dlp');
+        const audioInfo = await directService.getVideoInfo(videoId);
+        return res.json(audioInfo);
+      } catch (ytdlpError) {
+        console.error('Lỗi với yt-dlp, thử phương pháp khác:', ytdlpError.message);
+        // Tiếp tục thử các phương pháp khác
+      }
+    }
+    
     try {
       // Thử với ytdl-core
       const audioInfo = await getAudioInfo(videoId);
@@ -94,30 +106,43 @@ router.get('/:videoId', async (req, res) => {
     };
     let streamMethod = 'ytdl-core';
     
-    // Thử lấy thông tin với các phương pháp khác nhau
-    try {
-      // Thử với ytdl-core
-      audioInfo = await getAudioInfo(videoId);
-      console.log('Đã lấy thông tin audio bằng ytdl-core');
-      streamMethod = 'ytdl-core';
-    } catch (ytdlError) {
-      console.log('Lỗi với ytdl-core, thử với play-dl:', ytdlError.message);
+    // Trong môi trường production, ưu tiên yt-dlp ngay từ đầu
+    if (process.env.NODE_ENV === 'production') {
       try {
-        // Thử với play-dl
-        audioInfo = await alternativeService.getAudioInfo(videoId);
-        console.log('Đã lấy thông tin audio bằng play-dl');
-        streamMethod = 'play-dl';
-      } catch (playDlError) {
-        console.log('Lỗi với play-dl, thử với yt-dlp:', playDlError.message);
+        console.log('Môi trường production: Ưu tiên yt-dlp cho stream');
+        audioInfo = await directService.getVideoInfo(videoId);
+        console.log('Đã lấy thông tin audio bằng yt-dlp');
+        streamMethod = 'yt-dlp';
+      } catch (ytdlpError) {
+        console.error('Lỗi với yt-dlp, thử phương pháp khác:', ytdlpError.message);
+        // Tiếp tục thử các phương pháp khác
+      }
+    } else {
+      // Thử lấy thông tin với các phương pháp khác nhau
+      try {
+        // Thử với ytdl-core
+        audioInfo = await getAudioInfo(videoId);
+        console.log('Đã lấy thông tin audio bằng ytdl-core');
+        streamMethod = 'ytdl-core';
+      } catch (ytdlError) {
+        console.log('Lỗi với ytdl-core, thử với play-dl:', ytdlError.message);
         try {
-          // Thử với yt-dlp
-          audioInfo = await directService.getVideoInfo(videoId);
-          console.log('Đã lấy thông tin audio bằng yt-dlp');
-          streamMethod = 'yt-dlp';
-        } catch (ytdlpError) {
-          console.error('Cả ba phương thức đều thất bại khi lấy thông tin:', ytdlpError.message);
-          // Sử dụng giá trị mặc định, và hy vọng streaming trực tiếp hoạt động
-          streamMethod = 'yt-dlp-direct';
+          // Thử với play-dl
+          audioInfo = await alternativeService.getAudioInfo(videoId);
+          console.log('Đã lấy thông tin audio bằng play-dl');
+          streamMethod = 'play-dl';
+        } catch (playDlError) {
+          console.log('Lỗi với play-dl, thử với yt-dlp:', playDlError.message);
+          try {
+            // Thử với yt-dlp
+            audioInfo = await directService.getVideoInfo(videoId);
+            console.log('Đã lấy thông tin audio bằng yt-dlp');
+            streamMethod = 'yt-dlp';
+          } catch (ytdlpError) {
+            console.error('Cả ba phương thức đều thất bại khi lấy thông tin:', ytdlpError.message);
+            // Sử dụng giá trị mặc định, và hy vọng streaming trực tiếp hoạt động
+            streamMethod = 'yt-dlp-direct';
+          }
         }
       }
     }
@@ -142,30 +167,21 @@ router.get('/:videoId', async (req, res) => {
     try {
       console.log(`Đang tạo stream bằng phương thức: ${streamMethod}`);
       
-      switch(streamMethod) {
-        case 'play-dl':
-          try {
-            audioStream = await alternativeService.createAudioStream(videoId);
-          } catch (playDlStreamError) {
-            // Kiểm tra lỗi chuyển hướng
-            if (playDlStreamError.message === 'REDIRECT_TO_DIRECT_STREAM') {
-              console.log('Được chuyển hướng từ play-dl sang yt-dlp');
-              audioStream = await directService.createAudioStream(videoId);
-            } else {
-              throw playDlStreamError;
-            }
-          }
-          break;
-        case 'yt-dlp':
-        case 'yt-dlp-direct':
+      // Trong môi trường production, ưu tiên sử dụng yt-dlp
+      if (process.env.NODE_ENV === 'production' && streamMethod !== 'yt-dlp' && streamMethod !== 'yt-dlp-direct') {
+        try {
+          console.log('Môi trường production: Chuyển sang yt-dlp cho stream');
           audioStream = await directService.createAudioStream(videoId);
-          break;
-        case 'ytdl-core':
-        default:
-          try {
-            audioStream = createAudioStream(videoId);
-          } catch (ytdlStreamError) {
-            console.log('Lỗi khi tạo stream với ytdl-core, thử với play-dl:', ytdlStreamError.message);
+        } catch (ytdlpStreamError) {
+          console.log('Lỗi khi tạo stream với yt-dlp trong production, thử phương pháp thay thế:', ytdlpStreamError.message);
+          // Tiếp tục với phương pháp ban đầu
+        }
+      }
+      
+      // Nếu chưa có stream từ yt-dlp trong production, tiếp tục với phương pháp đã chọn
+      if (!audioStream) {
+        switch(streamMethod) {
+          case 'play-dl':
             try {
               audioStream = await alternativeService.createAudioStream(videoId);
             } catch (playDlStreamError) {
@@ -174,12 +190,35 @@ router.get('/:videoId', async (req, res) => {
                 console.log('Được chuyển hướng từ play-dl sang yt-dlp');
                 audioStream = await directService.createAudioStream(videoId);
               } else {
-                console.log('Lỗi khi tạo stream với play-dl, thử với yt-dlp:', playDlStreamError.message);
-                audioStream = await directService.createAudioStream(videoId);
+                throw playDlStreamError;
               }
             }
-          }
-          break;
+            break;
+          case 'yt-dlp':
+          case 'yt-dlp-direct':
+            audioStream = await directService.createAudioStream(videoId);
+            break;
+          case 'ytdl-core':
+          default:
+            try {
+              audioStream = createAudioStream(videoId);
+            } catch (ytdlStreamError) {
+              console.log('Lỗi khi tạo stream với ytdl-core, thử với play-dl:', ytdlStreamError.message);
+              try {
+                audioStream = await alternativeService.createAudioStream(videoId);
+              } catch (playDlStreamError) {
+                // Kiểm tra lỗi chuyển hướng
+                if (playDlStreamError.message === 'REDIRECT_TO_DIRECT_STREAM') {
+                  console.log('Được chuyển hướng từ play-dl sang yt-dlp');
+                  audioStream = await directService.createAudioStream(videoId);
+                } else {
+                  console.log('Lỗi khi tạo stream với play-dl, thử với yt-dlp:', playDlStreamError.message);
+                  audioStream = await directService.createAudioStream(videoId);
+                }
+              }
+            }
+            break;
+        }
       }
       
       if (!audioStream) {

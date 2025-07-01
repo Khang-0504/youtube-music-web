@@ -124,7 +124,7 @@ const getBasicVideoInfo = async (videoId) => {
 const getYtDlpVideoInfo = async (videoId) => {
   return new Promise((resolve, reject) => {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const command = `${ytdlpPath} -j --cookies-from-browser chrome ${videoUrl}`;
+    const command = `${ytdlpPath} -j --add-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9" ${videoUrl}`;
     
     exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       if (error) {
@@ -294,7 +294,8 @@ const createYtDlpStream = async (videoId) => {
       '--no-progress',
       '--no-playlist',
       '--quiet',
-      '--cookies-from-browser', 'chrome',
+      '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language: en-US,en;q=0.9',
       '-o', '-',
       videoUrl
     ]);

@@ -9,51 +9,42 @@ echo.
 echo Hệ điều hành: Windows
 
 REM Kiểm tra Python
-python --version > nul 2>&1
+python --version >nul 2>&1
 if %errorlevel% equ 0 (
     set PYTHON=python
-    for /f "tokens=*" %%a in ('python --version') do echo Python: %%a
+    echo Python được tìm thấy
 ) else (
-    python3 --version > nul 2>&1
-    if %errorlevel% equ 0 (
-        set PYTHON=python3
-        for /f "tokens=*" %%a in ('python3 --version') do echo Python: %%a
-    ) else (
-        echo Không tìm thấy Python. Vui lòng cài đặt Python 3.
-        exit /b 1
-    )
-)
-
-REM Kiểm tra pip
-%PYTHON% -m pip --version > nul 2>&1
-if %errorlevel% equ 0 (
-    set PIP=%PYTHON% -m pip
-    for /f "tokens=*" %%a in ('%PYTHON% -m pip --version') do echo Pip: %%a
-) else (
-    echo Không tìm thấy pip. Vui lòng cài đặt pip.
+    echo Không tìm thấy Python. Vui lòng cài đặt Python 3.
+    pause
     exit /b 1
 )
 
-REM Kiểm tra yt-dlp
-where yt-dlp > nul 2>&1
+REM Kiểm tra pip
+%PYTHON% -m pip --version >nul 2>&1
 if %errorlevel% equ 0 (
-    for /f "tokens=*" %%a in ('where yt-dlp') do set YTDLP_PATH=%%a
-    echo Đã tìm thấy yt-dlp tại: %YTDLP_PATH%
-    for /f "tokens=*" %%a in ('yt-dlp --version') do echo Phiên bản: %%a
-    
-    REM Kiểm tra xem đã cài đặt với hỗ trợ web chưa
-    yt-dlp --help | findstr "cookies-from-browser" > nul
-    if %errorlevel% neq 0 (
-        echo yt-dlp chưa hỗ trợ cookies-from-browser. Đang cài đặt lại...
-        %PIP% install -U "yt-dlp[web]"
-    ) else (
-        echo yt-dlp đã hỗ trợ cookies-from-browser.
-    )
+    set PIP=%PYTHON% -m pip
+    echo Pip được tìm thấy
 ) else (
-    echo Không tìm thấy yt-dlp. Đang cài đặt...
-    %PIP% install -U "yt-dlp[web]"
-    for /f "tokens=*" %%a in ('where yt-dlp') do set YTDLP_PATH=%%a
-    echo Đã cài đặt yt-dlp tại: %YTDLP_PATH%
+    echo Không tìm thấy pip. Vui lòng cài đặt pip.
+    pause
+    exit /b 1
+)
+
+REM Cài đặt yt-dlp
+echo.
+echo === Cài đặt yt-dlp ===
+echo Đang cài đặt yt-dlp với hỗ trợ web...
+%PIP% install -U "yt-dlp[web]"
+
+REM Kiểm tra cài đặt
+yt-dlp --version >nul 2>&1
+if %errorlevel% equ 0 (
+    echo yt-dlp đã được cài đặt thành công
+    set YTDLP_PATH=yt-dlp
+) else (
+    echo Không thể cài đặt yt-dlp. Vui lòng thử cài đặt thủ công: pip install "yt-dlp[web]"
+    pause
+    exit /b 1
 )
 
 REM Kiểm tra trình duyệt
@@ -65,76 +56,71 @@ set BROWSERS=chrome firefox edge brave opera
 set FOUND_BROWSER=
 
 for %%b in (%BROWSERS%) do (
-    echo|set /p="Kiểm tra %%b... "
-    yt-dlp --cookies-from-browser %%b --list-subs "https://www.youtube.com/watch?v=dQw4w9WgXcQ" >nul 2>&1
+    echo Kiểm tra %%b...
+    yt-dlp --cookies-from-browser %%b --version >nul 2>&1
     if %errorlevel% equ 0 (
-        echo TÌM THẤY ✓
+        echo TÌM THẤY - Có thể sử dụng %%b
         set FOUND_BROWSER=%%b
         goto browser_found
-    ) else (
-        echo Không tìm thấy.
     )
 )
 
 echo Không tìm thấy trình duyệt nào có thể sử dụng với yt-dlp.
+echo Vui lòng đảm bảo bạn đã cài đặt và đăng nhập vào YouTube trên một trong các trình duyệt: Chrome, Firefox, Edge
+pause
 exit /b 1
 
 :browser_found
 
-REM Thử tải video để kiểm tra khả năng vượt kiểm tra bot
 echo.
+echo === Trình duyệt đã tìm thấy: %FOUND_BROWSER% ===
+echo.
+
+REM Thử tải video để kiểm tra khả năng vượt kiểm tra bot
 echo === Kiểm tra khả năng vượt kiểm tra bot ===
 echo Đang thử tải thông tin video từ YouTube...
 
-set TEST_CMD=yt-dlp -j --cookies-from-browser %FOUND_BROWSER% --extractor-args "youtube:player_client=android,web,tv" --extractor-args "youtube:api=innertube" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" --add-header "Accept-Language: en-US,en;q=0.9" --add-header "Sec-Fetch-Mode: navigate" https://www.youtube.com/watch?v=dQw4w9WgXcQ
-
-echo Đang chạy lệnh: %TEST_CMD%
-%TEST_CMD% >nul 2>&1
+yt-dlp --cookies-from-browser %FOUND_BROWSER% -j --skip-download --extractor-args "youtube:player_client=android" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo THÀNH CÔNG ✓ - Có thể tải video mà không bị kiểm tra bot!
+    echo THÀNH CÔNG - Có thể tải video mà không bị kiểm tra bot!
 ) else (
-    echo THẤT BẠI ✗ - Vẫn bị YouTube kiểm tra bot.
-    echo Thử phương pháp thay thế với URL nhúng...
-    
-    set TEST_CMD=yt-dlp -j --cookies-from-browser %FOUND_BROWSER% --extractor-args "youtube:player_client=android,web,tv" --extractor-args "youtube:api=innertube" "https://www.youtube.com/embed/dQw4w9WgXcQ"
-    
-    %TEST_CMD% >nul 2>&1
+    echo Đang thử phương pháp thay thế...
+    yt-dlp --cookies-from-browser %FOUND_BROWSER% -j --skip-download "https://www.youtube.com/embed/dQw4w9WgXcQ" >nul 2>&1
     if %errorlevel% equ 0 (
-        echo THÀNH CÔNG ✓ - URL nhúng hoạt động!
+        echo THÀNH CÔNG - URL nhúng hoạt động!
     ) else (
-        echo THẤT BẠI ✗ - Cả hai phương pháp đều không hoạt động.
-        echo Vui lòng đăng nhập vào YouTube trong trình duyệt %FOUND_BROWSER% và thử lại.
-        exit /b 1
+        echo LƯU Ý: Có thể vẫn bị YouTube kiểm tra bot.
+        echo Vui lòng đảm bảo bạn đã đăng nhập vào YouTube trong trình duyệt %FOUND_BROWSER%
     )
 )
 
-REM Cập nhật file môi trường nếu cần thiết
+REM Cập nhật file môi trường
 echo.
 echo === Cập nhật cấu hình yt-dlp cho dự án ===
 
 REM Tạo file .env nếu chưa tồn tại
-if not exist ".env" (
-    type nul > .env
-)
-
-REM Thêm cấu hình vào file .env
-echo YTDLP_PATH=%YTDLP_PATH% >> .env
+echo YTDLP_PATH=%YTDLP_PATH% > .env
 echo YTDLP_BROWSER=%FOUND_BROWSER% >> .env
 
 echo.
 echo Đã cập nhật cấu hình yt-dlp vào file .env
 echo Bạn có thể sử dụng yt-dlp với --cookies-from-browser %FOUND_BROWSER% trong dự án của mình.
 echo.
-echo === Thiết lập hoàn tất ===
 
-REM Hướng dẫn sử dụng cho developer
+REM Tạo file test đơn giản để kiểm tra
+echo @echo off > test-ytdlp.bat
+echo echo Đang thử nghiệm yt-dlp với %FOUND_BROWSER%... >> test-ytdlp.bat
+echo yt-dlp --cookies-from-browser %FOUND_BROWSER% -f bestaudio -o test_audio.mp3 --skip-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ" >> test-ytdlp.bat
+echo echo Nếu không có lỗi hiển thị, cấu hình đã hoạt động! >> test-ytdlp.bat
+echo pause >> test-ytdlp.bat
+
+echo === Thiết lập hoàn tất ===
+echo File test-ytdlp.bat đã được tạo để bạn có thể kiểm tra lại cấu hình.
 echo.
-echo === Hướng dẫn sử dụng ===
+echo Hướng dẫn sử dụng:
 echo 1. Trong môi trường development, code sẽ tự động sử dụng --cookies-from-browser %FOUND_BROWSER%
 echo 2. Đảm bảo bạn đã đăng nhập vào YouTube trong trình duyệt %FOUND_BROWSER%
 echo 3. Không cần file cookies.txt khi phát triển trên local
-echo 4. Khi deploy lên server, bạn vẫn cần file cookies.txt cho môi trường production
 echo.
-echo Cảm ơn bạn đã sử dụng script thiết lập này!
 
 pause 

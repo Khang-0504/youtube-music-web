@@ -35,6 +35,7 @@ logs
 .DS_Store
 Thumbs.db
 
-# YouTube cookies file
-cookies.txt
-backend/cookies.txt
+# Không bỏ qua cookies.txt
+!backend/cookies.txt
+
+

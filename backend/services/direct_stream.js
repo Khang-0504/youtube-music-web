@@ -135,19 +135,25 @@ const getYtDlpVideoInfo = async (videoId) => {
     // Kiểm tra xem file cookies có tồn tại không
     const hasCookies = fs.existsSync(cookiesPath);
     
+    // Thử dùng phương pháp mới không cần cookies
     let command = `${ytdlpPath} -j`;
     
+    // Tùy chọn mạnh nhất để vượt qua kiểm tra bot
+    command += ` --extractor-args "youtube:player_client=android,web,tv" --skip-download --no-check-certificates`;
+    command += ` --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"`;
+    command += ` --add-header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"`;
+    command += ` --add-header "Accept-Language: en-US,en;q=0.9"`;
+    command += ` --add-header "Sec-Fetch-Mode: navigate"`;
+    command += ` --add-header "Sec-Fetch-Dest: document"`;
+    command += ` --add-header "Sec-Fetch-Site: none"`;
+    
+    // Thêm cookie nếu có
     if (hasCookies) {
       console.log('Đã tìm thấy file cookies tại:', cookiesPath);
-      // Bổ sung các tùy chọn để vượt qua kiểm tra bot
-      command += ` --cookies "${cookiesPath}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9" --add-header "Sec-Fetch-Mode: navigate"`;
+      command += ` --cookies "${cookiesPath}"`;
     } else {
       console.log('Không tìm thấy file cookies, sử dụng headers để mô phỏng trình duyệt');
-      command += ` --add-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9" --add-header "Sec-Fetch-Mode: navigate"`;
     }
-    
-    // Thêm các tùy chọn giúp vượt qua các hạn chế
-    command += ` --extractor-args "youtube:player_client=android" --no-check-certificates`;
     
     command += ` ${videoUrl}`;
     
@@ -157,43 +163,72 @@ const getYtDlpVideoInfo = async (videoId) => {
       if (error) {
         console.error('Lỗi khi lấy thông tin từ yt-dlp:', error);
         console.error('stderr:', stderr);
+        
+        // Thử lại với phương pháp khác nếu cần
+        if (stderr && stderr.includes("Sign in to confirm you're not a bot")) {
+          console.log('Đang thử lại với phương pháp khác');
+          
+          // Thử phương pháp innertube API
+          const innertubeCommand = `${ytdlpPath} -j --extractor-args "youtube:player_client=android" --extractor-args "youtube:api=innertube" --skip-download ${videoUrl}`;
+          
+          exec(innertubeCommand, { maxBuffer: 1024 * 1024 * 10 }, (innerError, innerStdout, innerStderr) => {
+            if (innerError) {
+              console.error('Lỗi khi thử lại với phương pháp innertube:', innerError);
+              return reject(error); // Trả về lỗi ban đầu nếu cả hai phương pháp đều thất bại
+            }
+            
+            try {
+              const videoInfo = JSON.parse(innerStdout);
+              processVideoInfo(videoInfo, resolve);
+            } catch (parseError) {
+              console.error('Lỗi khi phân tích dữ liệu từ phương pháp innertube:', parseError);
+              reject(parseError);
+            }
+          });
+          return;
+        }
+        
         return reject(error);
       }
       
       try {
         const videoInfo = JSON.parse(stdout);
-        
-        // Tìm định dạng audio tốt nhất
-        const audioFormats = videoInfo.formats.filter(format => 
-          format.acodec && format.acodec !== 'none' && (!format.vcodec || format.vcodec === 'none')
-        );
-        
-        let bestAudioFormat;
-        if (audioFormats.length > 0) {
-          // Sắp xếp theo chất lượng giảm dần
-          bestAudioFormat = audioFormats.sort((a, b) => {
-            const aQuality = a.abr || 0;
-            const bQuality = b.abr || 0;
-            return bQuality - aQuality;
-          })[0];
-        } else {
-          // Nếu không tìm thấy định dạng audio, sử dụng định dạng đầu tiên
-          bestAudioFormat = videoInfo.formats[0];
-        }
-        
-        resolve({
-          url: bestAudioFormat?.url || videoInfo.url,
-          title: videoInfo.title,
-          author: videoInfo.uploader || 'Unknown',
-          lengthSeconds: videoInfo.duration || 0,
-          mimeType: getMimeType(bestAudioFormat),
-          contentLength: bestAudioFormat?.filesize || 0
-        });
+        processVideoInfo(videoInfo, resolve);
       } catch (parseError) {
         console.error('Lỗi khi phân tích dữ liệu từ yt-dlp:', parseError);
         reject(parseError);
       }
     });
+  });
+};
+
+// Hàm xử lý thông tin video từ yt-dlp
+const processVideoInfo = (videoInfo, resolve) => {
+  // Tìm định dạng audio tốt nhất
+  const audioFormats = videoInfo.formats.filter(format => 
+    format.acodec && format.acodec !== 'none' && (!format.vcodec || format.vcodec === 'none')
+  );
+  
+  let bestAudioFormat;
+  if (audioFormats.length > 0) {
+    // Sắp xếp theo chất lượng giảm dần
+    bestAudioFormat = audioFormats.sort((a, b) => {
+      const aQuality = a.abr || 0;
+      const bQuality = b.abr || 0;
+      return bQuality - aQuality;
+    })[0];
+  } else {
+    // Nếu không tìm thấy định dạng audio, sử dụng định dạng đầu tiên
+    bestAudioFormat = videoInfo.formats[0];
+  }
+  
+  resolve({
+    url: bestAudioFormat?.url || videoInfo.url,
+    title: videoInfo.title,
+    author: videoInfo.uploader || 'Unknown',
+    lengthSeconds: videoInfo.duration || 0,
+    mimeType: getMimeType(bestAudioFormat),
+    contentLength: bestAudioFormat?.filesize || 0
   });
 };
 
@@ -409,25 +444,27 @@ const createYtDlpStream = async (videoId) => {
       '--no-progress',
       '--no-playlist',
       '--quiet',
-      // Thêm tùy chọn vượt qua kiểm tra bot
-      '--extractor-args', 'youtube:player_client=android',
-      '--no-check-certificates'
+      // Tùy chọn vượt qua kiểm tra bot mạnh hơn
+      '--extractor-args', 'youtube:player_client=android,web,tv',
+      '--no-check-certificates',
+      // Bổ sung thêm tùy chọn innertube API
+      '--extractor-args', 'youtube:api=innertube'
     ];
+    
+    // Header để mô phỏng trình duyệt
+    ytDlpArgs.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    ytDlpArgs.push('--add-header', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
+    ytDlpArgs.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
+    ytDlpArgs.push('--add-header', 'Sec-Fetch-Mode: navigate');
+    ytDlpArgs.push('--add-header', 'Sec-Fetch-Dest: document');
+    ytDlpArgs.push('--add-header', 'Sec-Fetch-Site: none');
     
     // Thêm tùy chọn cookies nếu file tồn tại
     if (hasCookies) {
       console.log('Sử dụng cookies từ:', cookiesPath);
       ytDlpArgs.push('--cookies', cookiesPath);
-      ytDlpArgs.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      ytDlpArgs.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
-      ytDlpArgs.push('--add-header', 'Sec-Fetch-Mode: navigate');
     } else {
-      console.log('Không tìm thấy cookies.txt, sử dụng headers thay thế');
-      ytDlpArgs.push(
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--add-header', 'Accept-Language: en-US,en;q=0.9',
-        '--add-header', 'Sec-Fetch-Mode: navigate'
-      );
+      console.log('Không tìm thấy cookies.txt');
     }
     
     // Thêm các tùy chọn cuối cùng
@@ -441,7 +478,14 @@ const createYtDlpStream = async (videoId) => {
     ytDlpProcess.stdout.pipe(passThrough);
     
     ytDlpProcess.stderr.on('data', (data) => {
-      console.error('yt-dlp stderr:', data.toString());
+      const errorMsg = data.toString();
+      console.error('yt-dlp stderr:', errorMsg);
+      
+      // Nếu gặp lỗi bot check, thử lại với phương pháp khác
+      if (errorMsg.includes("Sign in to confirm you're not a bot")) {
+        console.log('Đang thử lại với phương pháp khác cho streaming');
+        // Không cần xử lý ở đây, sẽ được xử lý trong sự kiện 'close'
+      }
     });
     
     ytDlpProcess.on('error', (error) => {
@@ -449,11 +493,29 @@ const createYtDlpStream = async (videoId) => {
       passThrough.emit('error', error);
     });
     
-    ytDlpProcess.on('close', (code) => {
+    ytDlpProcess.on('close', async (code) => {
       if (code !== 0) {
         console.log(`yt-dlp process exited with code ${code}`);
-        if (!passThrough.destroyed) {
-          passThrough.emit('error', new Error(`yt-dlp exited with code ${code}`));
+        
+        // Nếu thất bại, thử lại với các phương pháp khác
+        try {
+          console.log('Thử sử dụng Invidious API sau khi yt-dlp thất bại');
+          const invidiousStream = await createInvidiousStream(videoId);
+          invidiousStream.pipe(passThrough);
+        } catch (invidiousError) {
+          console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
+          
+          try {
+            console.log('Thử sử dụng Piped API sau khi Invidious thất bại');
+            const pipedStream = await createPipedStream(videoId);
+            pipedStream.pipe(passThrough);
+          } catch (pipedError) {
+            console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
+            
+            if (!passThrough.destroyed) {
+              passThrough.emit('error', new Error(`Không thể tạo stream audio từ bất kỳ nguồn nào`));
+            }
+          }
         }
       } else {
         console.log('yt-dlp stream kết thúc thành công');

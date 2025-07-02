@@ -126,7 +126,11 @@ const getYtDlpVideoInfo = async (videoId) => {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
     
     // Sử dụng tệp cookies.txt từ thư mục hiện tại hoặc thư mục cha
-    const cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+    // Thay đổi đường dẫn cookies - ưu tiên tệp www.youtube.com_cookies.txt 
+    let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
+    if (!fs.existsSync(cookiesPath)) {
+      cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+    }
     
     // Kiểm tra xem file cookies có tồn tại không
     const hasCookies = fs.existsSync(cookiesPath);
@@ -134,14 +138,20 @@ const getYtDlpVideoInfo = async (videoId) => {
     let command = `${ytdlpPath} -j`;
     
     if (hasCookies) {
-      console.log('Đã tìm thấy file cookies.txt, sử dụng để xác thực với YouTube');
-      command += ` --cookies "${cookiesPath}"`;
+      console.log('Đã tìm thấy file cookies tại:', cookiesPath);
+      // Bổ sung các tùy chọn để vượt qua kiểm tra bot
+      command += ` --cookies "${cookiesPath}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9" --add-header "Sec-Fetch-Mode: navigate"`;
     } else {
-      console.log('Không tìm thấy file cookies.txt, sử dụng headers để mô phỏng trình duyệt');
-      command += ` --add-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9"`;
+      console.log('Không tìm thấy file cookies, sử dụng headers để mô phỏng trình duyệt');
+      command += ` --add-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --add-header "Accept-Language: en-US,en;q=0.9" --add-header "Sec-Fetch-Mode: navigate"`;
     }
     
+    // Thêm các tùy chọn giúp vượt qua các hạn chế
+    command += ` --extractor-args "youtube:player_client=android" --no-check-certificates`;
+    
     command += ` ${videoUrl}`;
+    
+    console.log('Thực thi lệnh:', command);
     
     exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
       if (error) {
@@ -383,7 +393,11 @@ const createYtDlpStream = async (videoId) => {
   
   try {
     // Sử dụng tệp cookies.txt từ thư mục hiện tại hoặc thư mục cha
-    const cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+    // Thay đổi đường dẫn cookies - ưu tiên tệp www.youtube.com_cookies.txt
+    let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
+    if (!fs.existsSync(cookiesPath)) {
+      cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+    }
     
     // Kiểm tra xem file cookies có tồn tại không
     const hasCookies = fs.existsSync(cookiesPath);
@@ -395,22 +409,31 @@ const createYtDlpStream = async (videoId) => {
       '--no-progress',
       '--no-playlist',
       '--quiet',
+      // Thêm tùy chọn vượt qua kiểm tra bot
+      '--extractor-args', 'youtube:player_client=android',
+      '--no-check-certificates'
     ];
     
     // Thêm tùy chọn cookies nếu file tồn tại
     if (hasCookies) {
-      console.log('Sử dụng cookies.txt cho stream');
+      console.log('Sử dụng cookies từ:', cookiesPath);
       ytDlpArgs.push('--cookies', cookiesPath);
+      ytDlpArgs.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      ytDlpArgs.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
+      ytDlpArgs.push('--add-header', 'Sec-Fetch-Mode: navigate');
     } else {
       console.log('Không tìm thấy cookies.txt, sử dụng headers thay thế');
       ytDlpArgs.push(
-        '--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--add-header', 'Accept-Language: en-US,en;q=0.9'
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--add-header', 'Accept-Language: en-US,en;q=0.9',
+        '--add-header', 'Sec-Fetch-Mode: navigate'
       );
     }
     
     // Thêm các tùy chọn cuối cùng
     ytDlpArgs.push('-o', '-', videoUrl);
+    
+    console.log('Lệnh yt-dlp:', ytdlpPath, ytDlpArgs.join(' '));
     
     // Chạy yt-dlp với các tùy chọn đã cấu hình
     const ytDlpProcess = spawn(ytdlpPath, ytDlpArgs);
@@ -549,46 +572,42 @@ const createAudioStream = async (videoId) => {
     
     const env = process.env.NODE_ENV || 'development';
     
-    // Trong môi trường production (Render.com), thay đổi thứ tự ưu tiên
+    // Trong môi trường production (Render.com), ưu tiên yt-dlp
     if (env === 'production') {
-      console.log('Môi trường production: Ưu tiên các phương pháp vượt rate limit');
+      console.log('Môi trường production: Ưu tiên yt-dlp cho stream');
       
-      // Thứ tự ưu tiên: 1. Piped API, 2. yt-dlp với cookie, 3. Invidious API
-      try {
-        // 1. Thử Piped API trước
-        console.log('Thử sử dụng Piped API (ưu tiên 1)');
-        return await createPipedStream(videoId);
-      } catch (pipedError) {
-        console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
-        
-        // 2. Thử với yt-dlp nếu có cookie thực
-        if (ytdlpAvailable) {
-          try {
-            const cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
-            const hasCookies = fs.existsSync(cookiesPath);
-            const fileSize = hasCookies ? fs.statSync(cookiesPath).size : 0;
-            
-            // Chỉ sử dụng yt-dlp nếu file cookie lớn hơn 100 byte (có khả năng là cookie thực)
-            if (hasCookies && fileSize > 100) {
-              console.log('Tìm thấy cookie có kích thước hợp lệ, thử sử dụng yt-dlp');
-              return await createYtDlpStream(videoId);
-            } else {
-              console.log('File cookie quá nhỏ hoặc không tồn tại, bỏ qua yt-dlp');
-            }
-          } catch (ytdlpError) {
-            console.error('Lỗi khi tạo stream từ yt-dlp:', ytdlpError);
-          }
-        }
-        
-        // 3. Thử Invidious API
+      // Kiểm tra cookies
+      let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
+      if (!fs.existsSync(cookiesPath)) {
+        cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+      }
+      const hasCookies = fs.existsSync(cookiesPath);
+      
+      if (ytdlpAvailable && hasCookies) {
         try {
-          console.log('Thử sử dụng Invidious API (ưu tiên 3)');
-          return await createInvidiousStream(videoId);
-        } catch (invidiousError) {
-          console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
+          console.log('Sử dụng yt-dlp với cookies để stream');
+          return await createYtDlpStream(videoId);
+        } catch (ytdlpError) {
+          console.error('Lỗi khi tạo stream từ yt-dlp:', ytdlpError);
+          // Tiếp tục với các phương pháp khác
+        }
+      }
+      
+      // Thử Invidious nếu yt-dlp thất bại
+      try {
+        console.log('Thử sử dụng Invidious API');
+        return await createInvidiousStream(videoId);
+      } catch (invidiousError) {
+        console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
+        
+        // Thử Piped API
+        try {
+          console.log('Thử sử dụng Piped API');
+          return await createPipedStream(videoId);
+        } catch (pipedError) {
+          console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
           
-          // 4. Phương án cuối cùng - cố gắng dùng thông tin cơ bản
-          console.log('Thử phương án cuối cùng với getBasicVideoInfo');
+          // Phương án cuối cùng
           const info = await getBasicVideoInfo(videoId);
           if (info && info.url) {
             return await createStreamFromUrl(info.url);

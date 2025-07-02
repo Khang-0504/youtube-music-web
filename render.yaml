@@ -2,18 +2,25 @@ services:
   - type: web
     name: youtube-music-web
     env: node
-    buildCommand: ./render-build.sh
-    startCommand: ./start.sh
+    buildCommand: bash bin/update-render-env.sh && npm install && npm run build
+    startCommand: cd backend && npm install && npm start
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: HOST
         value: 0.0.0.0
       - key: PORT
         value: 10000
       - key: CORS_ORIGIN
         value: "*"
-      - key: DEFAULT_YOUTUBE_API_KEY
-        sync: false  # Điều này sẽ yêu cầu bạn nhập API key trong dashboard Render
       - key: PATH
         value: /opt/render/project/bin:${PATH}
-      - key: NODE_ENV
-        value: production 
+    buildFilter:
+      paths:
+        - src/**
+        - backend/**
+        - package.json
+        - bin/**
+        - render.yaml
+    healthCheckPath: /health
+    autoDeploy: true 

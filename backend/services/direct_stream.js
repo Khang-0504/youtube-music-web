@@ -8,6 +8,9 @@ const fs = require('fs');
 // Kiểm tra xem yt-dlp có sẵn không
 let ytdlpAvailable = false;
 let ytdlpPath = 'yt-dlp'; // Mặc định yt-dlp trong PATH
+let ytdlpConfigPath = null; // Đường dẫn tới file cấu hình
+let useEmbedUrl = false; // Có sử dụng URL embed không
+let fallbackOnly = false; // Chỉ sử dụng fallback API
 
 // Tìm yt-dlp trong PATH
 const checkYtDlp = () => {
@@ -18,6 +21,25 @@ const checkYtDlp = () => {
       ytdlpPath = projectBinPath;
       console.log('Đã tìm thấy yt-dlp trong thư mục dự án:', ytdlpPath);
       ytdlpAvailable = true;
+      
+      // Kiểm tra file cấu hình
+      const configPath = path.join(__dirname, '..', 'config', 'yt-dlp.conf');
+      if (fs.existsSync(configPath)) {
+        ytdlpConfigPath = configPath;
+        console.log('Đã tìm thấy file cấu hình yt-dlp:', ytdlpConfigPath);
+        
+        // Đọc các tùy chọn từ file cấu hình
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        if (configContent.includes('embed_url=true')) {
+          useEmbedUrl = true;
+          console.log('Sử dụng URL embed cho YouTube');
+        }
+        if (configContent.includes('fallback_only=true')) {
+          fallbackOnly = true;
+          console.log('Chỉ sử dụng các API thay thế (Invidious, Piped)');
+        }
+      }
+      
       resolve(true);
       return;
     }
@@ -123,60 +145,78 @@ const getBasicVideoInfo = async (videoId) => {
  */
 const getYtDlpVideoInfo = async (videoId) => {
   return new Promise((resolve, reject) => {
-    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    // Nếu chỉ sử dụng fallback, bỏ qua yt-dlp
+    if (fallbackOnly) {
+      return reject(new Error('Chỉ sử dụng API thay thế'));
+    }
+    
+    // Xác định URL (embed hoặc direct)
+    const videoUrl = useEmbedUrl 
+      ? `https://www.youtube.com/embed/${videoId}`
+      : `https://www.youtube.com/watch?v=${videoId}`;
+      
+    console.log(`Sử dụng URL: ${videoUrl}`);
     
     // Tùy chọn mới: sử dụng --cookies-from-browser thay vì cookies.txt
     let command = `${ytdlpPath} -j`;
     
-    // Tùy chọn mạnh nhất để vượt qua kiểm tra bot
-    command += ` --extractor-args "youtube:player_client=android,web,tv" --skip-download --no-check-certificates`;
-    command += ` --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"`;
-    command += ` --add-header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"`;
-    command += ` --add-header "Accept-Language: en-US,en;q=0.9"`;
-    command += ` --add-header "Sec-Fetch-Mode: navigate"`;
-    command += ` --add-header "Sec-Fetch-Dest: document"`;
-    command += ` --add-header "Sec-Fetch-Site: none"`;
-    
-    // Kiểm tra nếu đang chạy trên môi trường local (development)
-    const env = process.env.NODE_ENV || 'development';
-    const isLocal = env === 'development';
-    
-    if (isLocal) {
-      // Trên môi trường local, sử dụng --cookies-from-browser
-      console.log('Môi trường development: sử dụng cookies-from-browser');
-      
-      // Xác định OS để chọn đúng trình duyệt
-      const isWindows = process.platform === 'win32';
-      const isMac = process.platform === 'darwin';
-      
-      if (isWindows) {
-        // Thử Chrome, Edge, Firefox trên Windows
-        command += ` --cookies-from-browser chrome`;
-      } else if (isMac) {
-        // Thử Safari, Chrome, Firefox trên Mac
-        command += ` --cookies-from-browser safari`;
-      } else {
-        // Trên Linux thử Firefox, Chrome
-        command += ` --cookies-from-browser firefox`;
-      }
+    // Sử dụng file cấu hình nếu có
+    if (ytdlpConfigPath) {
+      console.log(`Sử dụng file cấu hình: ${ytdlpConfigPath}`);
+      command += ` --config-location "${ytdlpConfigPath}"`;
     } else {
-      // Trên môi trường production, vẫn thử dùng cookies.txt
-      let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
-      if (!fs.existsSync(cookiesPath)) {
-        cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+      // Các tham số mặc định
+      command += ` --extractor-args "youtube:player_client=android,web,tv" --skip-download --no-check-certificates`;
+      command += ` --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"`;
+      command += ` --add-header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"`;
+      command += ` --add-header "Accept-Language: en-US,en;q=0.9"`;
+      command += ` --add-header "Sec-Fetch-Mode: navigate"`;
+      command += ` --add-header "Sec-Fetch-Dest: document"`;
+      command += ` --add-header "Sec-Fetch-Site: none"`;
+      
+      // Kiểm tra nếu đang chạy trên môi trường local (development)
+      const env = process.env.NODE_ENV || 'development';
+      const isLocal = env === 'development';
+      
+      if (isLocal) {
+        // Trên môi trường local, sử dụng --cookies-from-browser
+        console.log('Môi trường development: sử dụng cookies-from-browser');
+        
+        // Xác định OS để chọn đúng trình duyệt
+        const isWindows = process.platform === 'win32';
+        const isMac = process.platform === 'darwin';
+        
+        if (isWindows) {
+          // Thử Chrome, Edge, Firefox trên Windows
+          command += ` --cookies-from-browser chrome`;
+        } else if (isMac) {
+          // Thử Safari, Chrome, Firefox trên Mac
+          command += ` --cookies-from-browser safari`;
+        } else {
+          // Trên Linux thử Firefox, Chrome
+          command += ` --cookies-from-browser firefox`;
+        }
+      } else {
+        // Trên môi trường production, vẫn thử dùng cookies.txt
+        let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
+        if (!fs.existsSync(cookiesPath)) {
+          cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+        }
+        
+        const hasCookies = fs.existsSync(cookiesPath);
+        if (hasCookies) {
+          console.log('Môi trường production: sử dụng cookies.txt tại:', cookiesPath);
+          command += ` --cookies "${cookiesPath}"`;
+        } else {
+          console.log('Không tìm thấy file cookies, sử dụng headers để mô phỏng trình duyệt');
+        }
       }
       
-      const hasCookies = fs.existsSync(cookiesPath);
-      if (hasCookies) {
-        console.log('Môi trường production: sử dụng cookies.txt tại:', cookiesPath);
-        command += ` --cookies "${cookiesPath}"`;
-      } else {
-        console.log('Không tìm thấy file cookies, sử dụng headers để mô phỏng trình duyệt');
-      }
+      // Thêm API innertube
+      command += ` --extractor-args "youtube:api=innertube"`;
     }
     
-    // Thêm API innertube và URL video
-    command += ` --extractor-args "youtube:api=innertube"`;
+    // Thêm URL video
     command += ` ${videoUrl}`;
     
     console.log('Thực thi lệnh:', command);
@@ -190,43 +230,30 @@ const getYtDlpVideoInfo = async (videoId) => {
         if (stderr && stderr.includes("Sign in to confirm you're not a bot")) {
           console.log('Đang thử lại với phương pháp thứ hai');
           
-          // Thử với tùy chọn bỏ qua địa chỉ IP
-          const secondCommand = `${ytdlpPath} -j --extractor-args "youtube:player_client=android" --extractor-args "youtube:api=innertube" --proxy "socks5://127.0.0.1:9150" --skip-download ${videoUrl}`;
-          
-          exec(secondCommand, { maxBuffer: 1024 * 1024 * 10 }, (secondError, secondStdout, secondStderr) => {
-            if (secondError) {
-              console.error('Lỗi khi thử phương pháp thứ hai:', secondError);
-              
-              // Thử phương pháp thứ ba - sử dụng URL nhúng thay vì URL trực tiếp
-              console.log('Đang thử phương pháp thứ ba với URL nhúng');
-              const embedCommand = `${ytdlpPath} -j --extractor-args "youtube:player_client=android" --skip-download "https://www.youtube.com/embed/${videoId}"`;
-              
-              exec(embedCommand, { maxBuffer: 1024 * 1024 * 10 }, (embedError, embedStdout, embedStderr) => {
-                if (embedError) {
-                  console.error('Lỗi khi thử phương pháp thứ ba:', embedError);
-                  return reject(error); // Trả về lỗi ban đầu nếu cả ba phương pháp đều thất bại
-                }
-                
-                try {
-                  const videoInfo = JSON.parse(embedStdout);
-                  processVideoInfo(videoInfo, resolve);
-                } catch (parseError) {
-                  console.error('Lỗi khi phân tích dữ liệu từ phương pháp embed:', parseError);
-                  reject(parseError);
-                }
-              });
-              return;
-            }
+          // Thử với phương pháp embed URL nếu chưa thử
+          if (!useEmbedUrl) {
+            const embedUrl = `https://www.youtube.com/embed/${videoId}`;
+            console.log(`Thử lại với URL nhúng: ${embedUrl}`);
             
-            try {
-              const videoInfo = JSON.parse(secondStdout);
-              processVideoInfo(videoInfo, resolve);
-            } catch (parseError) {
-              console.error('Lỗi khi phân tích dữ liệu từ phương pháp thứ hai:', parseError);
-              reject(parseError);
-            }
-          });
-          return;
+            // Xây dựng lại lệnh với URL embed
+            let embedCommand = command.replace(videoUrl, embedUrl);
+            
+            exec(embedCommand, { maxBuffer: 1024 * 1024 * 10 }, (embedError, embedStdout, embedStderr) => {
+              if (embedError) {
+                console.error('Lỗi khi thử với URL embed:', embedError);
+                return reject(error); // Trả về lỗi ban đầu nếu cả hai phương pháp đều thất bại
+              }
+              
+              try {
+                const videoInfo = JSON.parse(embedStdout);
+                processVideoInfo(videoInfo, resolve);
+              } catch (parseError) {
+                console.error('Lỗi khi phân tích dữ liệu từ URL embed:', parseError);
+                reject(parseError);
+              }
+            });
+            return;
+          }
         }
         
         return reject(error);
@@ -462,69 +489,81 @@ const createStreamFromUrl = (url) => {
  * @returns {Promise<ReadableStream>} Stream audio
  */
 const createYtDlpStream = async (videoId) => {
-  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  // Nếu chỉ sử dụng fallback, bỏ qua yt-dlp
+  if (fallbackOnly) {
+    return Promise.reject(new Error('Chỉ sử dụng API thay thế'));
+  }
+  
+  // Xác định URL (embed hoặc direct)
+  const videoUrl = useEmbedUrl 
+    ? `https://www.youtube.com/embed/${videoId}`
+    : `https://www.youtube.com/watch?v=${videoId}`;
+    
   console.log('Đang tạo stream audio từ yt-dlp:', videoUrl);
   
   const passThrough = new PassThrough();
   
   try {
-    // Tùy chọn yt-dlp được tối ưu cho streaming
-    const ytDlpArgs = [
-      '-f', 'bestaudio/best',
-      '--no-part',
-      '--no-progress',
-      '--no-playlist',
-      '--quiet',
-      // Tùy chọn vượt qua kiểm tra bot mạnh hơn
-      '--extractor-args', 'youtube:player_client=android,web,tv',
-      '--no-check-certificates',
-      // Bổ sung thêm tùy chọn innertube API
-      '--extractor-args', 'youtube:api=innertube'
-    ];
+    // Chuẩn bị các tham số cho yt-dlp
+    const ytDlpArgs = [];
     
-    // Header để mô phỏng trình duyệt
-    ytDlpArgs.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    ytDlpArgs.push('--add-header', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
-    ytDlpArgs.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
-    ytDlpArgs.push('--add-header', 'Sec-Fetch-Mode: navigate');
-    ytDlpArgs.push('--add-header', 'Sec-Fetch-Dest: document');
-    ytDlpArgs.push('--add-header', 'Sec-Fetch-Site: none');
-    
-    // Kiểm tra nếu đang chạy trên môi trường local (development)
-    const env = process.env.NODE_ENV || 'development';
-    const isLocal = env === 'development';
-    
-    if (isLocal) {
-      // Trên môi trường local, sử dụng --cookies-from-browser
-      console.log('Môi trường development: sử dụng cookies-from-browser');
-      
-      // Xác định OS để chọn đúng trình duyệt
-      const isWindows = process.platform === 'win32';
-      const isMac = process.platform === 'darwin';
-      
-      if (isWindows) {
-        // Thử Chrome, Edge, Firefox trên Windows
-        ytDlpArgs.push('--cookies-from-browser', 'chrome');
-      } else if (isMac) {
-        // Thử Safari, Chrome, Firefox trên Mac
-        ytDlpArgs.push('--cookies-from-browser', 'safari');
-      } else {
-        // Trên Linux thử Firefox, Chrome
-        ytDlpArgs.push('--cookies-from-browser', 'firefox');
-      }
+    // Sử dụng file cấu hình nếu có
+    if (ytdlpConfigPath) {
+      ytDlpArgs.push('--config-location', ytdlpConfigPath);
     } else {
-      // Trên môi trường production, vẫn thử dùng cookies.txt
-      let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
-      if (!fs.existsSync(cookiesPath)) {
-        cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
-      }
+      // Tùy chọn cơ bản
+      ytDlpArgs.push('-f', 'bestaudio/best');
+      ytDlpArgs.push('--no-part', '--no-progress', '--no-playlist', '--quiet');
       
-      const hasCookies = fs.existsSync(cookiesPath);
-      if (hasCookies) {
-        console.log('Sử dụng cookies từ:', cookiesPath);
-        ytDlpArgs.push('--cookies', cookiesPath);
+      // Tùy chọn vượt qua kiểm tra bot
+      ytDlpArgs.push('--extractor-args', 'youtube:player_client=android,web,tv');
+      ytDlpArgs.push('--no-check-certificates');
+      ytDlpArgs.push('--extractor-args', 'youtube:api=innertube');
+      
+      // Header để mô phỏng trình duyệt
+      ytDlpArgs.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      ytDlpArgs.push('--add-header', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
+      ytDlpArgs.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
+      ytDlpArgs.push('--add-header', 'Sec-Fetch-Mode: navigate');
+      ytDlpArgs.push('--add-header', 'Sec-Fetch-Dest: document');
+      ytDlpArgs.push('--add-header', 'Sec-Fetch-Site: none');
+      
+      // Kiểm tra nếu đang chạy trên môi trường local (development)
+      const env = process.env.NODE_ENV || 'development';
+      const isLocal = env === 'development';
+      
+      if (isLocal) {
+        // Trên môi trường local, sử dụng --cookies-from-browser
+        console.log('Môi trường development: sử dụng cookies-from-browser');
+        
+        // Xác định OS để chọn đúng trình duyệt
+        const isWindows = process.platform === 'win32';
+        const isMac = process.platform === 'darwin';
+        
+        if (isWindows) {
+          // Thử Chrome, Edge, Firefox trên Windows
+          ytDlpArgs.push('--cookies-from-browser', 'chrome');
+        } else if (isMac) {
+          // Thử Safari, Chrome, Firefox trên Mac
+          ytDlpArgs.push('--cookies-from-browser', 'safari');
+        } else {
+          // Trên Linux thử Firefox, Chrome
+          ytDlpArgs.push('--cookies-from-browser', 'firefox');
+        }
       } else {
-        console.log('Không tìm thấy cookies.txt');
+        // Trên môi trường production, vẫn thử dùng cookies.txt
+        let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
+        if (!fs.existsSync(cookiesPath)) {
+          cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
+        }
+        
+        const hasCookies = fs.existsSync(cookiesPath);
+        if (hasCookies) {
+          console.log('Sử dụng cookies từ:', cookiesPath);
+          ytDlpArgs.push('--cookies', cookiesPath);
+        } else {
+          console.log('Không tìm thấy cookies.txt');
+        }
       }
     }
     
@@ -556,6 +595,11 @@ const createYtDlpStream = async (videoId) => {
         
         // Thử phương pháp thay thế - dùng URL nhúng
         try {
+          // Nếu đã sử dụng URL nhúng, hoặc đang trong môi trường có cấu hình, chuyển sang API thay thế
+          if (useEmbedUrl || ytdlpConfigPath) {
+            throw new Error('Cần sử dụng API thay thế');
+          }
+          
           console.log('Thử lại với URL nhúng');
           const embedArgs = [...ytDlpArgs];
           // Thay thế URL cuối cùng
@@ -570,51 +614,14 @@ const createYtDlpStream = async (videoId) => {
           
           embedProcess.on('error', async (embedError) => {
             console.error('Lỗi khi chạy embed yt-dlp:', embedError);
-            
             // Nếu vẫn thất bại, thử các phương pháp khác
-            try {
-              console.log('Thử sử dụng Invidious API');
-              const invidiousStream = await createInvidiousStream(videoId);
-              invidiousStream.pipe(passThrough);
-            } catch (invidiousError) {
-              console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
-              
-              try {
-                console.log('Thử sử dụng Piped API');
-                const pipedStream = await createPipedStream(videoId);
-                pipedStream.pipe(passThrough);
-              } catch (pipedError) {
-                console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
-                
-                if (!passThrough.destroyed) {
-                  passThrough.emit('error', new Error(`Không thể tạo stream audio từ bất kỳ nguồn nào`));
-                }
-              }
-            }
+            await tryFallbackAPIs(videoId, passThrough);
           });
           
           embedProcess.on('close', async (embedCode) => {
             if (embedCode !== 0) {
               // Nếu vẫn thất bại, thử các phương pháp khác
-              try {
-                console.log('Thử sử dụng Invidious API');
-                const invidiousStream = await createInvidiousStream(videoId);
-                invidiousStream.pipe(passThrough);
-              } catch (invidiousError) {
-                console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
-                
-                try {
-                  console.log('Thử sử dụng Piped API');
-                  const pipedStream = await createPipedStream(videoId);
-                  pipedStream.pipe(passThrough);
-                } catch (pipedError) {
-                  console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
-                  
-                  if (!passThrough.destroyed) {
-                    passThrough.emit('error', new Error(`Không thể tạo stream audio từ bất kỳ nguồn nào`));
-                  }
-                }
-              }
+              await tryFallbackAPIs(videoId, passThrough);
             }
           });
           
@@ -623,25 +630,7 @@ const createYtDlpStream = async (videoId) => {
           console.error('Lỗi khi tạo stream với URL nhúng:', embedError);
           
           // Nếu thất bại, thử lại với các phương pháp khác
-          try {
-            console.log('Thử sử dụng Invidious API sau khi yt-dlp thất bại');
-            const invidiousStream = await createInvidiousStream(videoId);
-            invidiousStream.pipe(passThrough);
-          } catch (invidiousError) {
-            console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
-            
-            try {
-              console.log('Thử sử dụng Piped API sau khi Invidious thất bại');
-              const pipedStream = await createPipedStream(videoId);
-              pipedStream.pipe(passThrough);
-            } catch (pipedError) {
-              console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
-              
-              if (!passThrough.destroyed) {
-                passThrough.emit('error', new Error(`Không thể tạo stream audio từ bất kỳ nguồn nào`));
-              }
-            }
-          }
+          await tryFallbackAPIs(videoId, passThrough);
         }
       } else {
         console.log('yt-dlp stream kết thúc thành công');
@@ -663,6 +652,33 @@ const createYtDlpStream = async (videoId) => {
     console.error('Lỗi khi tạo stream với yt-dlp:', error);
     passThrough.emit('error', error);
     return passThrough;
+  }
+};
+
+/**
+ * Thử các API thay thế khi yt-dlp thất bại
+ * @param {string} videoId - ID video
+ * @param {PassThrough} passThrough - Stream để pipe dữ liệu vào
+ */
+const tryFallbackAPIs = async (videoId, passThrough) => {
+  try {
+    console.log('Thử sử dụng Invidious API');
+    const invidiousStream = await createInvidiousStream(videoId);
+    invidiousStream.pipe(passThrough);
+  } catch (invidiousError) {
+    console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
+    
+    try {
+      console.log('Thử sử dụng Piped API');
+      const pipedStream = await createPipedStream(videoId);
+      pipedStream.pipe(passThrough);
+    } catch (pipedError) {
+      console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
+      
+      if (!passThrough.destroyed) {
+        passThrough.emit('error', new Error(`Không thể tạo stream audio từ bất kỳ nguồn nào`));
+      }
+    }
   }
 };
 
@@ -760,42 +776,26 @@ const createAudioStream = async (videoId) => {
     
     const env = process.env.NODE_ENV || 'development';
     
-    // Trong môi trường production (Render.com), ưu tiên yt-dlp
-    if (env === 'production') {
-      console.log('Môi trường production: Ưu tiên yt-dlp cho stream');
+    // Trong môi trường production, kiểm tra xem có sử dụng fallback only không
+    if (env === 'production' && fallbackOnly) {
+      console.log('Môi trường production: Chỉ sử dụng API thay thế');
       
-      // Kiểm tra cookies
-      let cookiesPath = path.resolve(__dirname, '..', 'www.youtube.com_cookies.txt');
-      if (!fs.existsSync(cookiesPath)) {
-        cookiesPath = path.resolve(__dirname, '..', 'cookies.txt');
-      }
-      const hasCookies = fs.existsSync(cookiesPath);
-      
-      if (ytdlpAvailable && hasCookies) {
-        try {
-          console.log('Sử dụng yt-dlp với cookies để stream');
-          return await createYtDlpStream(videoId);
-        } catch (ytdlpError) {
-          console.error('Lỗi khi tạo stream từ yt-dlp:', ytdlpError);
-          // Tiếp tục với các phương pháp khác
-        }
-      }
-      
-      // Thử Invidious nếu yt-dlp thất bại
+      // Thử với Invidious API trước
       try {
-        console.log('Thử sử dụng Invidious API');
+        console.log('Sử dụng Invidious API');
         return await createInvidiousStream(videoId);
       } catch (invidiousError) {
         console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
         
-        // Thử Piped API
+        // Thử với Piped API
         try {
-          console.log('Thử sử dụng Piped API');
+          console.log('Sử dụng Piped API');
           return await createPipedStream(videoId);
         } catch (pipedError) {
           console.error('Lỗi khi tạo stream từ Piped API:', pipedError);
           
-          // Phương án cuối cùng
+          // Thử với oEmbed API
+          console.log('Sử dụng phương pháp cuối cùng');
           const info = await getBasicVideoInfo(videoId);
           if (info && info.url) {
             return await createStreamFromUrl(info.url);
@@ -805,8 +805,24 @@ const createAudioStream = async (videoId) => {
       }
     }
     
-    // Trong môi trường development, ưu tiên yt-dlp
-    // Nếu yt-dlp khả dụng, sử dụng nó
+    // Trong môi trường production, ưu tiên yt-dlp với cấu hình đã thiết lập
+    if (env === 'production' && ytdlpConfigPath) {
+      console.log('Môi trường production: Sử dụng yt-dlp với cấu hình tùy chỉnh');
+      
+      try {
+        return await createYtDlpStream(videoId);
+      } catch (ytdlpError) {
+        console.error('Lỗi khi tạo stream từ yt-dlp:', ytdlpError);
+        
+        // Nếu thất bại, thử với các API thay thế
+        const passThrough = new PassThrough();
+        await tryFallbackAPIs(videoId, passThrough);
+        return passThrough;
+      }
+    }
+    
+    // Trong môi trường development, hoặc nếu không có cấu hình đặc biệt
+    // Ưu tiên yt-dlp khi có sẵn
     if (ytdlpAvailable) {
       try {
         return await createYtDlpStream(videoId);
@@ -819,12 +835,19 @@ const createAudioStream = async (videoId) => {
         } catch (invidiousError) {
           console.error('Lỗi khi tạo stream từ Invidious:', invidiousError);
           
-          // Thử phương pháp cuối cùng
-          const info = await getVideoInfo(videoId);
-          if (info && info.url) {
-            return await createStreamFromUrl(info.url);
+          // Thử dùng Piped
+          try {
+            return await createPipedStream(videoId);
+          } catch (pipedError) {
+            console.error('Lỗi khi tạo stream từ Piped:', pipedError);
+            
+            // Phương pháp cuối cùng
+            const info = await getBasicVideoInfo(videoId);
+            if (info && info.url) {
+              return await createStreamFromUrl(info.url);
+            }
+            throw new Error('Không thể tạo stream audio');
           }
-          throw new Error('Không thể lấy URL stream');
         }
       }
     } else {
@@ -839,20 +862,16 @@ const createAudioStream = async (videoId) => {
         
         // Thử dùng Piped
         try {
-          console.log('Đang tạo stream qua Piped API');
-          return await createStreamFromUrl(`https://pipedapi.kavin.rocks/streams/${videoId}`);
+          return await createPipedStream(videoId);
         } catch (pipedError) {
-          console.error('Lỗi khi tạo stream qua Piped API:', pipedError);
+          console.error('Lỗi khi tạo stream từ Piped:', pipedError);
           
-          // Thử lấy thông tin video trực tiếp
+          // Phương pháp cuối cùng
           const info = await getBasicVideoInfo(videoId);
-          
           if (info && info.url) {
-            console.log('Thử tạo stream trực tiếp từ URL');
             return await createStreamFromUrl(info.url);
           }
-          
-          throw new Error('Không thể tạo stream audio bằng bất kỳ phương pháp nào');
+          throw new Error('Không thể tạo stream audio');
         }
       }
     }

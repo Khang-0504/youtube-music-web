@@ -177,3 +177,143 @@ Nếu cookies.txt được cấu hình đúng:
 ## Giấy phép
 
 MIT 
+
+## Hướng dẫn sử dụng với yt-dlp và cookies-from-browser
+
+Ứng dụng sử dụng yt-dlp để truy cập nội dung từ YouTube. Có hai cách thiết lập:
+
+### 1. Cài đặt tự động với script
+
+**Trên Windows:**
+- Chạy file `setup-ytdlp.bat` để tự động cài đặt và cấu hình yt-dlp
+
+**Trên Linux/macOS:**
+- Chạy lệnh `./setup-ytdlp.sh` để tự động cài đặt và cấu hình yt-dlp
+
+Script sẽ tự động:
+- Cài đặt yt-dlp với hỗ trợ web (`pip install yt-dlp[web]`)
+- Tìm trình duyệt đã đăng nhập YouTube trên máy tính của bạn
+- Kiểm tra khả năng vượt qua kiểm tra bot của YouTube
+- Tạo file cấu hình .env với các tham số cần thiết
+
+### 2. Cài đặt thủ công
+
+Nếu bạn muốn cài đặt thủ công:
+
+1. Cài đặt yt-dlp với hỗ trợ web:
+   ```
+   pip install yt-dlp[web]
+   ```
+
+2. Đảm bảo bạn đã đăng nhập vào YouTube trong trình duyệt (Chrome, Firefox, Safari, vv.)
+
+3. Khi chạy ứng dụng trong môi trường development, yt-dlp sẽ tự động lấy cookies từ trình duyệt của bạn.
+
+### Lưu ý quan trọng
+
+- **Môi trường development:** Sử dụng `--cookies-from-browser` để lấy cookies trực tiếp từ trình duyệt
+- **Môi trường production:** Vẫn cần file cookies.txt để xác thực với YouTube
+- Nếu gặp lỗi "Sign in to confirm you're not a bot", hãy đảm bảo đã đăng nhập vào YouTube trong trình duyệt
+
+## Triển khai
+
+Dự án được thiết kế để triển khai trên nền tảng Render.com. Chi tiết triển khai xem tại [deploy-guide.md](deploy-guide.md). 
+
+## YouTube Music Web
+
+Ứng dụng web nghe nhạc YouTube đơn giản và hiệu quả.
+
+### Tính năng
+
+- Phát nhạc từ YouTube mà không bị gián đoạn bởi quảng cáo
+- Tìm kiếm bài hát, album, nghệ sĩ
+- Tạo và quản lý danh sách phát
+- Giao diện người dùng thân thiện và đáp ứng
+- Hỗ trợ phát nhạc nền trên thiết bị di động
+
+### Cài đặt và Chạy
+
+#### Phương pháp 1: Sử dụng Docker
+
+```
+docker-compose up -d
+```
+
+#### Phương pháp 2: Cài đặt thủ công
+
+1. Cài đặt Node.js (phiên bản 16+)
+2. Cài đặt yt-dlp (sử dụng để stream âm thanh từ YouTube)
+
+```bash
+# Trên Linux/Mac
+pip install -U "yt-dlp[web]"
+
+# Trên Windows
+pip install -U "yt-dlp[web]"
+# HOẶC tải xuống từ https://github.com/yt-dlp/yt-dlp/releases
+```
+
+3. Cài đặt dependencies
+```bash
+# Cài đặt frontend dependencies
+npm install
+
+# Cài đặt backend dependencies
+cd backend
+npm install
+cd ..
+```
+
+4. Chạy trình thiết lập yt-dlp (quan trọng)
+```bash
+# Trên Windows
+./setup-ytdlp.bat
+
+# Trên Linux/Mac
+./setup-ytdlp.sh
+```
+
+5. Chạy ứng dụng
+```bash
+# Chạy cả frontend và backend
+npm run dev
+
+# Hoặc chạy riêng từng cái
+npm run start-frontend
+cd backend && npm run dev
+```
+
+### Giải quyết vấn đề "Sign in to confirm you're not a bot"
+
+YouTube đã tăng cường phát hiện bot. Để giải quyết vấn đề này, ứng dụng sử dụng các phương pháp sau:
+
+#### Trong môi trường phát triển (local)
+
+1. Tự động sử dụng cookies từ trình duyệt của bạn
+2. Hỗ trợ Chrome, Firefox, Edge, Safari tùy theo hệ điều hành
+3. Chạy lệnh thiết lập: `./setup-ytdlp.bat` (Windows) hoặc `./setup-ytdlp.sh` (Linux/Mac)
+
+#### Trong môi trường sản xuất (Render.com)
+
+1. Tự động sử dụng cơ chế fallback qua các API thay thế:
+   - Invidious API
+   - Piped API
+   - URL Embed
+
+2. Tự động cập nhật cookies giả qua script `bin/update-production-cookies.sh`
+
+### Các API thay thế được hỗ trợ
+
+Nếu yt-dlp không thể truy cập YouTube trực tiếp, ứng dụng sẽ tự động sử dụng các API thay thế:
+
+1. **Invidious API**: API phi tập trung để truy cập YouTube
+2. **Piped API**: API thay thế khác để stream nội dung YouTube
+3. **URL Embed**: Sử dụng iframe embed để vượt qua một số hạn chế
+
+### Triển khai lên Render.com
+
+Ứng dụng có sẵn cấu hình để triển khai lên Render.com. Chỉ cần kết nối repository với Render và nó sẽ tự động triển khai.
+
+### Đóng góp
+
+Mọi đóng góp đều được chào đón! Vui lòng tạo issue hoặc pull request. 
